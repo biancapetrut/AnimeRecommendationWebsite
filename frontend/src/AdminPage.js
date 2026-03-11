@@ -1,16 +1,15 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
+import "./App.css";
 
 function AdminPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  // Initialize token from localStorage
   const [token, setToken] = useState(() => localStorage.getItem("adminToken") || "");
   const [loggedIn, setLoggedIn] = useState(false);
 
   const [animeList, setAnimeList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-
   const [expandedAnime, setExpandedAnime] = useState(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,33 +26,33 @@ function AdminPage() {
     link: "",
   });
 
-  // -----------------------------
-  // INFINITE SCROLL SETUP
-  // -----------------------------
-  const LIMIT = 50;
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const listRef = useRef(null);
+  // WRAPPED FETCH TO HANDLE 401
+  const apiRequest = async (url, options = {}) => {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: token ? `Bearer ${token}` : "",
+        "Content-Type": "application/json",
+      },
+    });
 
-  const fetchAnime = async (reset = false) => {
-    if (!hasMore && !reset) return;
+    // Auto-logout if token is invalid/expired
+    if (res.status === 401) {
+      alert("Session expired. Please log in again.");
+      handleLogout();
+      return null;
+    }
 
+    return res.json();
+  };
+
+  // FETCH ANIME
+  const fetchAnime = async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `http://127.0.0.1:5000/anime?offset=${reset ? 0 : offset}&limit=${LIMIT}`
-      );
-      const data = await res.json();
-
-      if (reset) {
-        setAnimeList(data);
-        setOffset(LIMIT);
-        setHasMore(data.length === LIMIT);
-      } else {
-        setAnimeList((prev) => [...prev, ...data]);
-        setOffset((prev) => prev + LIMIT);
-        setHasMore(data.length === LIMIT);
-      }
+      const data = await apiRequest("http://127.0.0.1:5000/anime");
+      if (data) setAnimeList(data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -61,15 +60,7 @@ function AdminPage() {
     }
   };
 
-  const handleScroll = (e) => {
-    const bottom =
-      e.target.scrollHeight - e.target.scrollTop <= e.target.clientHeight + 50;
-    if (bottom && !loading && hasMore) fetchAnime();
-  };
-
-  // -----------------------------
-  // LOGIN
-  // -----------------------------
+  // LOGIN / LOGOUT
   const handleLogin = async () => {
     try {
       const res = await fetch("http://127.0.0.1:5000/admin/login", {
@@ -77,16 +68,12 @@ function AdminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-
       const data = await res.json();
-
       if (res.status === 200) {
         setToken(data.token);
-        localStorage.setItem("adminToken", data.token); // persist token
+        localStorage.setItem("adminToken", data.token);
         setLoggedIn(true);
-        setOffset(0);
-        setHasMore(true);
-        fetchAnime(true);
+        fetchAnime();
       } else {
         alert(data.error || "Login failed");
       }
@@ -96,13 +83,6 @@ function AdminPage() {
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter") handleLogin();
-  };
-
-  // -----------------------------
-  // LOGOUT, DELETE, TOGGLE, MODAL, FORM HANDLERS
-  // -----------------------------
   const handleLogout = async () => {
     try {
       if (token) {
@@ -115,7 +95,7 @@ function AdminPage() {
       console.error("Logout error:", err);
     } finally {
       setToken("");
-      localStorage.removeItem("adminToken"); // remove token
+      localStorage.removeItem("adminToken");
       setLoggedIn(false);
       setAnimeList([]);
       setUsername("");
@@ -123,24 +103,20 @@ function AdminPage() {
     }
   };
 
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter") handleLogin();
+  };
+
+  // Anime actions / CRUD operations
   const deleteAnime = async (id) => {
     if (!window.confirm("Delete this anime?")) return;
 
-    try {
-      const res = await fetch("http://127.0.0.1:5000/admin/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ id }),
-      });
+    const data = await apiRequest("http://127.0.0.1:5000/admin/delete", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    });
 
-      const data = await res.json();
-      if (data.success) fetchAnime(true);
-    } catch (err) {
-      console.error(err);
-    }
+    if (data?.success) fetchAnime();
   };
 
   const toggleExpand = (id) => {
@@ -184,37 +160,19 @@ function AdminPage() {
   };
 
   const handleChange = (e) => {
-    setFormData((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
   const submitForm = async () => {
-    try {
-      const url = isCreating
-        ? "http://127.0.0.1:5000/admin/create"
-        : "http://127.0.0.1:5000/admin/edit";
+    const url = isCreating
+      ? "http://127.0.0.1:5000/admin/create"
+      : "http://127.0.0.1:5000/admin/edit";
+    const body = isCreating ? formData : { id: editingAnime.id, ...formData };
 
-      const body = isCreating ? formData : { id: editingAnime.id, ...formData };
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        fetchAnime(true);
-        closeModal();
-      }
-    } catch (err) {
-      console.error(err);
+    const data = await apiRequest(url, { method: "POST", body: JSON.stringify(body) });
+    if (data?.success) {
+      fetchAnime();
+      closeModal();
     }
   };
 
@@ -222,61 +180,56 @@ function AdminPage() {
     anime.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // -----------------------------
-  // AUTO-LOGIN ON PAGE LOAD
-  // -----------------------------
+  // INITIAL EFFECT
   useEffect(() => {
     if (token) {
       setLoggedIn(true);
-      setOffset(0);
-      setHasMore(true);
-      fetchAnime(true);
+      fetchAnime();
     }
   }, []);
 
-  // -----------------------------
-  // LOGIN PAGE
-  // -----------------------------
+  // RENDER
   if (!loggedIn) {
     return (
-      <div style={{ padding: "2rem" }}>
-        <h2>Admin Login</h2>
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onKeyPress={handleKeyPress}
-        />
-        <input
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyPress={handleKeyPress}
-        />
-        <button onClick={handleLogin}>Login</button>
+      <div style={{ padding: "2rem" }} className="admin-login-page">
+        <h2 className="admin-login-title">Admin Login</h2>
+        <div className="admin-login-form">
+          <input
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onKeyPress={handleKeyPress}
+            className="admin-input"
+          />
+          <input
+            placeholder="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyPress={handleKeyPress}
+            className="admin-input"
+          />
+          <button onClick={handleLogin} className="admin-button">Login</button>
+        </div>
       </div>
     );
   }
 
-  // -----------------------------
-  // ADMIN PANEL
-  // -----------------------------
   return (
-    <div style={{ padding: "2rem" }}>
-      <h2>Admin Panel</h2>
-      <button onClick={handleLogout}>Logout</button>
-      <button onClick={openCreateModal} style={{ marginLeft: "10px" }}>
+    <div style={{ padding: "2rem" }} className="admin-panel">
+      <h2 className="admin-panel-title">Admin Panel</h2>
+      <button onClick={handleLogout} className="admin-button">Logout</button>
+      <button onClick={openCreateModal} style={{ marginLeft: "10px" }} className="admin-button">
         Create Anime
       </button>
 
-      {/* SEARCH */}
-      <div style={{ margin: "1rem 0", position: "relative", width: "250px" }}>
+      <div style={{ margin: "1rem 0", position: "relative", width: "250px" }} className="admin-search">
         <input
           placeholder="Search anime..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           style={{ padding: "5px", width: "100%" }}
+          className="admin-input"
         />
         {searchQuery && (
           <span
@@ -289,23 +242,20 @@ function AdminPage() {
               cursor: "pointer",
               fontWeight: "bold",
             }}
+            className="admin-clear-search"
           >
             ×
           </span>
         )}
       </div>
 
-      {/* LIST */}
-      <div
-        ref={listRef}
-        onScroll={handleScroll}
-        style={{ maxHeight: "70vh", overflowY: "auto" }}
-      >
+      <div style={{ maxHeight: "70vh", overflowY: "auto" }} className="admin-anime-list">
         {filteredAnime.map((anime) => (
-          <div key={anime.id} style={{ borderBottom: "1px solid #ddd", padding: "10px 0" }}>
+          <div key={anime.id} style={{ borderBottom: "1px solid #ddd", padding: "10px 0" }} className="admin-anime-item">
             <div
               onClick={() => toggleExpand(anime.id)}
               style={{ display: "flex", alignItems: "center", cursor: "pointer" }}
+              className="admin-anime-summary"
             >
               <span style={{ fontSize: "20px", marginRight: "10px" }}>
                 {expandedAnime === anime.id ? "▼" : "▶"}
@@ -320,6 +270,7 @@ function AdminPage() {
                   borderRadius: "4px",
                   marginRight: "15px",
                 }}
+                className="admin-anime-image"
               />
               <h3 style={{ margin: 0 }}>{anime.title}</h3>
             </div>
@@ -333,6 +284,7 @@ function AdminPage() {
                   padding: "15px",
                   borderRadius: "6px",
                 }}
+                className="admin-anime-details"
               >
                 <p><b>Year:</b> {anime.year}</p>
                 <p><b>Genres:</b> {anime.genres}</p>
@@ -345,18 +297,16 @@ function AdminPage() {
                   <a href={anime.link} target="_blank" rel="noreferrer">{anime.link}</a>
                 </p>
                 <div style={{ marginTop: "10px" }}>
-                  <button onClick={() => openEditModal(anime)}>Edit</button>
-                  <button onClick={() => deleteAnime(anime.id)} style={{ marginLeft: "10px" }}>Delete</button>
+                  <button onClick={() => openEditModal(anime)} className="admin-button">Edit</button>
+                  <button onClick={() => deleteAnime(anime.id)} style={{ marginLeft: "10px" }} className="admin-button">Delete</button>
                 </div>
               </div>
             )}
           </div>
         ))}
         {loading && <p>Loading...</p>}
-        {!hasMore && !loading && <p style={{ textAlign: "center" }}>No more anime.</p>}
       </div>
 
-      {/* MODAL (unchanged) */}
       {isModalOpen && (
         <div
           style={{
@@ -370,6 +320,7 @@ function AdminPage() {
             justifyContent: "center",
             alignItems: "center",
           }}
+          className="admin-modal-overlay"
         >
           <div
             style={{
@@ -380,38 +331,39 @@ function AdminPage() {
               maxHeight: "80vh",
               overflowY: "auto",
             }}
+            className="admin-modal-content"
           >
             <h3>{isCreating ? "Create Anime" : "Edit Anime"}</h3>
 
             <label>Title</label>
-            <input name="title" value={formData.title} onChange={handleChange} style={{ width: "100%" }} />
+            <input name="title" value={formData.title} onChange={handleChange} style={{ width: "100%" }} className="admin-input" />
 
             <label>Year</label>
-            <input name="year" value={formData.year} onChange={handleChange} style={{ width: "100%" }} />
+            <input name="year" value={formData.year} onChange={handleChange} style={{ width: "100%" }} className="admin-input" />
 
             <label>Genres</label>
-            <input name="genres" value={formData.genres} onChange={handleChange} style={{ width: "100%" }} />
+            <input name="genres" value={formData.genres} onChange={handleChange} style={{ width: "100%" }} className="admin-input" />
 
             <label>Description</label>
-            <textarea name="description" rows="5" value={formData.description} onChange={handleChange} style={{ width: "100%" }} />
+            <textarea name="description" rows="5" value={formData.description} onChange={handleChange} style={{ width: "100%" }} className="admin-textarea" />
 
             <label>Image URL</label>
-            <input name="image_url" value={formData.image_url} onChange={handleChange} style={{ width: "100%" }} />
+            <input name="image_url" value={formData.image_url} onChange={handleChange} style={{ width: "100%" }} className="admin-input" />
             {formData.image_url && (
               <div style={{ marginTop: "10px", textAlign: "center" }}>
-                <img src={formData.image_url} alt="preview" style={{ width: "150px", borderRadius: "6px" }} />
+                <img src={formData.image_url} alt="preview" style={{ width: "150px", borderRadius: "6px" }} className="admin-preview-image" />
               </div>
             )}
 
             <label>Popularity</label>
-            <input name="popularity" value={formData.popularity} onChange={handleChange} style={{ width: "100%" }} />
+            <input name="popularity" value={formData.popularity} onChange={handleChange} style={{ width: "100%" }} className="admin-input" />
 
             <label>Link</label>
-            <input name="link" value={formData.link} onChange={handleChange} style={{ width: "100%" }} />
+            <input name="link" value={formData.link} onChange={handleChange} style={{ width: "100%" }} className="admin-input" />
 
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "20px" }}>
-              <button onClick={submitForm}>{isCreating ? "Create" : "Save"}</button>
-              <button onClick={closeModal}>Cancel</button>
+              <button onClick={submitForm} className="admin-button">{isCreating ? "Create" : "Save"}</button>
+              <button onClick={closeModal} className="admin-button">Cancel</button>
             </div>
           </div>
         </div>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
+import './App.css';
 
 function MainApp() {
   const [search, setSearch] = useState("");
@@ -7,52 +8,21 @@ function MainApp() {
   const [selectedFavorites, setSelectedFavorites] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const limit = 50;
 
-  const browseContainerRef = useRef(null);
-
-  // -----------------------------
-  // Fetch initial browse anime
-  // -----------------------------
   useEffect(() => {
     fetchBrowseAnime();
   }, []);
 
   const fetchBrowseAnime = async () => {
-    setLoadingMore(true);
     try {
-      const response = await fetch(
-        `http://127.0.0.1:5000/browse?offset=${offset}&limit=${limit}`
-      );
+      const response = await fetch("http://127.0.0.1:5000/browse");
       const data = await response.json();
-      setBrowseAnime((prev) => [...prev, ...data]);
-      setOffset((prev) => prev + limit);
+      setBrowseAnime(data);
     } catch (err) {
       console.error("Error loading browse anime:", err);
-    } finally {
-      setLoadingMore(false);
     }
   };
 
-  // -----------------------------
-  // Infinite scroll handler
-  // -----------------------------
-  const handleScroll = () => {
-    const container = browseContainerRef.current;
-    if (!container) return;
-
-    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 5) {
-      if (!loadingMore) {
-        fetchBrowseAnime();
-      }
-    }
-  };
-
-  // -----------------------------
-  // Search functionality
-  // -----------------------------
   const searchAnime = async (query) => {
     setSearch(query);
 
@@ -70,9 +40,6 @@ function MainApp() {
     }
   };
 
-  // -----------------------------
-  // Favorites handling
-  // -----------------------------
   const addFavorite = (title) => {
     if (!selectedFavorites.includes(title)) {
       setSelectedFavorites([...selectedFavorites, title]);
@@ -83,12 +50,9 @@ function MainApp() {
     setSelectedFavorites(selectedFavorites.filter((t) => t !== title));
   };
 
-  // -----------------------------
-  // Fetch recommendations
-  // -----------------------------
   const fetchRecommendations = async () => {
     if (selectedFavorites.length === 0) {
-      alert("Select at least one favorite anime.");
+      alert("Start by selecting at least one favorite anime!");
       return;
     }
 
@@ -108,67 +72,96 @@ function MainApp() {
     }
   };
 
-  // -----------------------------
-  // Render
-  // -----------------------------
   return (
-    <div style={{ padding: "2rem", fontFamily: "Arial", maxWidth: "900px", margin: "auto" }}>
-      <h1>Anime Recommendation System</h1>
+    <div className="container">
 
-      {/* SEARCH BAR */}
-      <h2>Search Anime</h2>
-      <input
-        type="text"
-        placeholder="Search anime..."
-        value={search}
-        onChange={(e) => searchAnime(e.target.value)}
-        style={{ width: "300px", padding: "8px", marginBottom: "1rem" }}
-      />
+      {/* HERO / BANNER */}
+      <div className="hero-banner">
+        <h1>Anime Recommendation System</h1>
+        <p className="hero-tagline">
+          Discover your next must-watch anime based on your personal tastes! ✨
+        </p>
+      </div>
 
-      {/* SEARCH RESULTS */}
-      {searchResults.length > 0 && (
-        <div
-          style={{
-            border: "1px solid #ccc",
-            padding: "1rem",
-            marginBottom: "1rem",
-            maxWidth: "500px",
-          }}
-        >
-          {searchResults.map((anime) => (
-            <div
-              key={anime.id}
+      {/* SEARCH SECTION */}
+      <div className="search-section">
+        <h2>Search Anime</h2>
+        <p className="info-box">Pick a few favorites to get personalized recommendations.</p>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <input
+            type="text"
+            placeholder="Search by title..."
+            value={search}
+            onChange={(e) => searchAnime(e.target.value)}
+            className="rounded-input"
+            style={{ paddingRight: "30px" }}
+          />
+          {search && (
+            <button
+              onClick={() => searchAnime("")}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                marginBottom: "8px",
+                position: "absolute",
+                right: "5px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                border: "none",
+                background: "transparent",
                 cursor: "pointer",
+                fontSize: "16px",
+                color: "#888",
+                padding: 0,
               }}
-              onClick={() => addFavorite(anime.title)}
             >
-              <img
-                src={anime.image_url}
-                alt={anime.title}
-                style={{
-                  width: "40px",
-                  height: "60px",
-                  objectFit: "cover",
-                  borderRadius: "4px",
-                }}
-              />
-              <span>{anime.title}</span>
-            </div>
-          ))}
+              ✖
+            </button>
+          )}
         </div>
-      )}
+
+        {searchResults.length > 0 && (
+          <div className="card search-results-card" style={{ maxWidth: '500px' }}>
+            {searchResults.map((anime) => {
+              const isSelected = selectedFavorites.includes(anime.title);
+              return (
+                <div
+                  key={anime.id}
+                  className={`search-result ${isSelected ? "selected" : ""}`}
+                  onClick={() => addFavorite(anime.title)}
+                  style={{ position: "relative", cursor: "pointer" }}
+                >
+                  <img
+                    src={anime.image_url}
+                    alt={anime.title}
+                    style={{
+                      width: "40px",
+                      height: "60px",
+                      objectFit: "cover",
+                      borderRadius: "8px",
+                    }}
+                  />
+                  <span>{anime.title}</span>
+                  {isSelected && (
+                    <button
+                      className="remove-button-top"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFavorite(anime.title);
+                      }}
+                    >
+                      ✖
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* BROWSE ANIME */}
       <div style={{ marginBottom: "1.5rem" }}>
-        <h2>Browse Anime</h2>
+        <h2>Browse Popular Anime</h2>
         <div
-          ref={browseContainerRef}
-          onScroll={handleScroll}
+          className="browse-scroll"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, 120px)",
@@ -179,48 +172,50 @@ function MainApp() {
             padding: "5px",
           }}
         >
-          {browseAnime.map((anime) => (
-            <div
-              key={anime.id}
-              style={{
-                cursor: "pointer",
-                transition: "transform 0.2s",
-              }}
-              onClick={() => addFavorite(anime.title)}
-              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.05)")}
-              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-            >
+          {browseAnime.map((anime) => {
+            const isSelected = selectedFavorites.includes(anime.title);
+            return (
               <div
-                style={{
-                  width: "120px",
-                  height: "180px",
-                  overflow: "hidden",
-                  borderRadius: "6px",
-                }}
+                key={anime.id}
+                className={`browse-item ${isSelected ? "selected" : ""}`}
+                onClick={() => addFavorite(anime.title)}
+                style={{ position: "relative", cursor: "pointer" }}
               >
-                <img
-                  src={anime.image_url}
-                  alt={anime.title}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                  }}
-                />
+                <div style={{ width: "120px", height: "180px", overflow: "hidden", borderRadius: "8px" }}>
+                  <img
+                    src={anime.image_url}
+                    alt={anime.title}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                  />
+                  {isSelected && (
+                    <button
+                      className="remove-button-top"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFavorite(anime.title);
+                      }}
+                    >
+                      ✖
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: "12px", textAlign: "center", marginTop: "5px" }}>
+                  {anime.title}
+                </div>
               </div>
-              <div style={{ fontSize: "12px", textAlign: "center", marginTop: "5px" }}>
-                {anime.title}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-        {loadingMore && <p style={{ textAlign: "center" }}>Loading more anime...</p>}
       </div>
 
       {/* SELECTED FAVORITES */}
       {selectedFavorites.length > 0 && (
         <div style={{ marginBottom: "1.5rem" }}>
-          <h3>Selected Favorites</h3>
+          <h3>Your Favorites</h3>
           {selectedFavorites.map((title) => (
             <div
               key={title}
@@ -229,14 +224,7 @@ function MainApp() {
               <span>{title}</span>
               <button
                 onClick={() => removeFavorite(title)}
-                style={{
-                  background: "#ff4d4d",
-                  border: "none",
-                  color: "white",
-                  cursor: "pointer",
-                  padding: "3px 8px",
-                  borderRadius: "4px",
-                }}
+                className="remove-button"
               >
                 ✖
               </button>
@@ -247,11 +235,11 @@ function MainApp() {
 
       {/* GET RECOMMENDATIONS BUTTON */}
       <button
-        style={{ marginTop: "1rem", padding: "10px 20px", fontSize: "16px" }}
+        className="rounded-button"
         onClick={fetchRecommendations}
         disabled={loading}
       >
-        {loading ? "Loading..." : "Get Recommendations"}
+        {loading ? "Loading..." : "Get Recommendations ✨"}
       </button>
 
       {/* RECOMMENDATIONS */}
@@ -259,35 +247,20 @@ function MainApp() {
         <div style={{ marginTop: "2rem" }}>
           <h2>Recommended Anime</h2>
           {recommendations.map((anime) => (
-            <div
-              key={anime.id}
-              style={{
-                border: "1px solid #ddd",
-                padding: "1rem",
-                marginBottom: "1rem",
-                borderRadius: "8px",
-                display: "flex",
-                gap: "1rem",
-                flexWrap: "wrap",
-              }}
-            >
+            <div key={anime.id} className="card">
               <div
                 style={{
                   width: "220px",
                   height: "380px",
                   overflow: "hidden",
-                  borderRadius: "6px",
                   flexShrink: 0,
+                  borderRadius: "12px"
                 }}
               >
                 <img
                   src={anime.image_url}
                   alt={anime.title}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                  }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               </div>
               <div style={{ flex: 1, minWidth: "200px" }}>
@@ -305,11 +278,7 @@ function MainApp() {
                 </h3>
                 <p>
                   <strong>Year:</strong> {anime.year}{" "}
-                  {anime.genres && (
-                    <>
-                      | <strong>Genres:</strong> {anime.genres}
-                    </>
-                  )}
+                  {anime.genres && <>| <strong>Genres:</strong> {anime.genres}</>}
                 </p>
                 <p>{anime.description}</p>
                 {anime.reason && (

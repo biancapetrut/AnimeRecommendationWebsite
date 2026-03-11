@@ -20,23 +20,20 @@ print("HF_API_TOKEN:", HF_API_TOKEN)
 app = Flask(__name__)
 CORS(app)
 
-MODEL = "openai/gpt-oss-120b"
+MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 DB_FILE = "anime.db"
 
-# -----------------------------
 # ADMIN LOGIN CONFIG
-# -----------------------------
+
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "123")
-JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey")  # change in production
+JWT_SECRET = os.getenv("JWT_SECRET", "supersecretkey")  
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_MINUTES = 60  # token valid for 1 hour
+JWT_EXPIRE_MINUTES = 60  
 revoked_tokens = set()
 
 
-# -----------------------------
 # DATABASE CONNECTION
-# -----------------------------
 
 def get_db():
     conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
@@ -44,14 +41,10 @@ def get_db():
     return conn
 
 
-# -----------------------------
-# GET ALL ANIME
-# -----------------------------
+# ENDPOINTS
 
 @app.route("/anime")
 def get_anime():
-    offset = int(request.args.get("offset", 0))
-    limit = int(request.args.get("limit", 50))
 
     conn = get_db()
     cursor = conn.cursor()
@@ -59,9 +52,8 @@ def get_anime():
     cursor.execute("""
         SELECT id, title, year, genres, description, image_url, popularity, link
         FROM anime
-        ORDER BY popularity ASC
-        LIMIT ? OFFSET ?
-    """, (limit, offset))
+        ORDER BY popularity ASC, id ASC
+    """)
 
     rows = cursor.fetchall()
     conn.close()
@@ -70,9 +62,7 @@ def get_anime():
     return jsonify(anime_list)
 
 
-# -----------------------------
-# EXTRACT TITLES FROM LLM
-# -----------------------------
+
 
 def extract_anime_titles(text):
 
@@ -82,9 +72,7 @@ def extract_anime_titles(text):
     return titles
 
 
-# -----------------------------
-# RECOMMENDATION ENDPOINT
-# -----------------------------
+# Recommendation algorithm
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
@@ -96,7 +84,7 @@ def recommend():
 
     anime_list = "\n".join(favorites)
 
-    # LLM prompt: ask for Romaji + English + reason
+    # LLM prompt
     messages = [
         {"role": "system", "content": "You are an anime recommendation expert."},
         {
@@ -106,13 +94,12 @@ A user likes the following anime:
 
 {anime_list}
 
-Recommend 10 anime they would enjoy.
+Recommend 5 anime they would enjoy.
 Return a Markdown table with these columns:
 1. Number
 2. Title in Romaji (Japanese)
 3. English Title
-4. Year
-5. Reason (Explain why this anime is recommended and how it is similar to the user's favorites).
+4. Reason (Explain why this anime is recommended and how it is similar to the user's favorites).
 
 Do not include anime already listed.
 Use Romaji for Japanese titles, do not use Kanji or Kana.
@@ -135,31 +122,35 @@ Use Romaji for Japanese titles, do not use Kanji or Kana.
         logging.info("===== RAW LLM OUTPUT =====")
         logging.info(raw_text)
         logging.info("==========================")
+        data = response.json()
+        raw_text = data["choices"][0]["message"]["content"]
 
-        # -----------------------------
+        # Log token usage
+        usage = data.get("usage")
+        if usage:
+            logging.info(f"Token usage: {usage}")
+
+        logging.info("===== RAW LLM OUTPUT =====")
+        logging.info(raw_text)
+        logging.info("==========================")
+
         # EXTRACT TITLES AND REASONS
-        # -----------------------------
-        # Match lines in Markdown table
         lines = raw_text.split("\n")
         recommendations_raw_list = []
         for line in lines:
             if re.match(r"^\|\s*\d+\s*\|", line):
-                # Example line:
-                # | 1 | **Code Geass: Hangyaku no Lelouch** | Code Geass: Lelouch of the Rebellion | 2006 | Reason here... |
                 parts = line.split("|")
-                if len(parts) >= 6:
+                if len(parts) >= 5:
                     romaji_title = parts[2].strip().strip("**")
                     english_title = parts[3].strip()
-                    reason = parts[5].strip()
+                    reason = parts[4].strip()
                     recommendations_raw_list.append({
                         "romaji": romaji_title,
                         "english": english_title,
                         "reason": reason
                     })
 
-        # -----------------------------
-        # FUZZY MATCH TITLES AGAINST DATABASE
-        # -----------------------------
+        # FUZZY MATCH 
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT title FROM anime")
@@ -177,9 +168,6 @@ Use Romaji for Japanese titles, do not use Kanji or Kana.
         if not matched_titles:
             return jsonify({"recommendations_raw": raw_text, "recommendations": []})
 
-        # -----------------------------
-        # FETCH MATCHED ANIME FROM DATABASE
-        # -----------------------------
         conn = get_db()
         cursor = conn.cursor()
         placeholders = ",".join(["?"] * len(matched_titles))
@@ -191,10 +179,8 @@ Use Romaji for Japanese titles, do not use Kanji or Kana.
         rows = cursor.fetchall()
         conn.close()
 
-        # Map reasons to matched titles
         final_recommendations = []
         for row in rows:
-            # Try to find reason from raw list
             reason = ""
             for rec in recommendations_raw_list:
                 if rec["english"] == row["title"] or rec["romaji"] == row["title"]:
@@ -205,7 +191,7 @@ Use Romaji for Japanese titles, do not use Kanji or Kana.
                 "id": row["id"],
                 "title": row["title"],
                 "year": row["year"],
-                "genres": row["genres"],  # <-- add this line
+                "genres": row["genres"],  
                 "description": row["description"],
                 "image_url": row["image_url"],
                 "link": row["link"] if "link" in row.keys() else "",
@@ -246,20 +232,15 @@ def search_anime():
 
 @app.route("/browse")
 def browse_anime():
-    offset = int(request.args.get("offset", 0))
-    limit = int(request.args.get("limit", 100))  # default 100
-    
+
     conn = get_db()
     cursor = conn.cursor()
 
-
-    # Fetch top 100 by popularity (can later add offset for "Load More")
     cursor.execute("""
         SELECT id, title, image_url, popularity, link
         FROM anime
-        ORDER BY popularity ASC
-        LIMIT ? OFFSET ?
-    """, (limit, offset))
+        ORDER BY popularity ASC,  id ASC
+    """)
     results = cursor.fetchall()
     conn.close()
 
@@ -301,7 +282,6 @@ def admin_required(f):
             return jsonify({"error": "Missing or invalid token"}), 401
         token = auth_header.split(" ")[1]
 
-        # Check if token has been revoked
         if token in revoked_tokens:
             return jsonify({"error": "Token revoked"}), 401
 
@@ -315,7 +295,6 @@ def admin_required(f):
         return f(*args, **kwargs)
     return wrapper
 
-# Admin create
 @app.route("/admin/create", methods=["POST"])
 @admin_required
 def admin_create():
@@ -330,7 +309,6 @@ def admin_create():
     conn.close()
     return jsonify({"success": True})
 
-# Admin delete
 @app.route("/admin/delete", methods=["POST"])
 @admin_required
 def admin_delete():
@@ -367,9 +345,7 @@ def admin_logout():
     return jsonify({"success": True})
 
 
-# -----------------------------
 # RUN SERVER
-# -----------------------------
 
 if __name__ == "__main__":
     app.run(debug=True)
